@@ -54,6 +54,8 @@
 
 /* USER CODE BEGIN Includes */
 
+#include "git_sha.h"
+
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
