@@ -103,6 +103,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_FATFS_Init();
+	MX_SPI2_Init();
+	
+	USER_initialize(0);
 
   /* USER CODE BEGIN 2 */
 

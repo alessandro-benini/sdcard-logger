@@ -62,7 +62,7 @@
 /* Exported constants --------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */
 extern Diskio_drvTypeDef  USER_Driver;
-
+DSTATUS USER_initialize (BYTE pdrv);
 /* USER CODE END 0 */
    
 #ifdef __cplusplus
