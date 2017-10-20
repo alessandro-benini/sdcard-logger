@@ -70,26 +70,29 @@
 #define CS_HIGH() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
 #define CS_LOW()  HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
 
-#define CMD0		(0)				/* GO_IDLE_STATE */
-#define CMD1		(1)				/* SEND_OP_COND (MMC) */
-#define	ACMD41	(0x80+41)	/* SEND_OP_COND (SDC) */
-#define CMD8		(8)				/* SEND_IF_COND */
-#define CMD9		(9)				/* SEND_CSD */
-#define CMD10		(10)			/* SEND_CID */
-#define CMD12		(12)			/* STOP_TRANSMISSION */
-#define ACMD13	(0x80+13)	/* SD_STATUS (SDC) */
-#define CMD16		(16)			/* SET_BLOCKLEN */
-#define CMD17		(17)			/* READ_SINGLE_BLOCK */
-#define CMD18		(18)			/* READ_MULTIPLE_BLOCK */
-#define CMD23		(23)			/* SET_BLOCK_COUNT (MMC) */
-#define	ACMD23	(0x80+23)	/* SET_WR_BLK_ERASE_COUNT (SDC) */
-#define CMD24		(24)			/* WRITE_BLOCK */
-#define CMD25		(25)			/* WRITE_MULTIPLE_BLOCK */
-#define CMD32		(32)			/* ERASE_ER_BLK_START */
-#define CMD33		(33)			/* ERASE_ER_BLK_END */
-#define CMD38		(38)			/* ERASE */
-#define CMD55		(55)			/* APP_CMD */
-#define CMD58		(58)			/* READ_OCR */
+uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+uint8_t CMD0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
+uint8_t CMD_ANSWER[] = {0xFF};
+
+#define CMD1		0x41	/* SEND_OP_COND (MMC) */
+#define	ACMD41	(0x80+41)		/* SEND_OP_COND (SDC) */
+#define CMD8		(8)					/* SEND_IF_COND */
+#define CMD9		(9)					/* SEND_CSD */
+#define CMD10		(10)				/* SEND_CID */
+#define CMD12		(12)				/* STOP_TRANSMISSION */
+#define ACMD13	(0x80+13)		/* SD_STATUS (SDC) */
+#define CMD16		(16)				/* SET_BLOCKLEN */
+#define CMD17		(17)				/* READ_SINGLE_BLOCK */
+#define CMD18		(18)				/* READ_MULTIPLE_BLOCK */
+#define CMD23		(23)				/* SET_BLOCK_COUNT (MMC) */
+#define	ACMD23	(0x80+23)		/* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define CMD24		(24)				/* WRITE_BLOCK */
+#define CMD25		(25)				/* WRITE_MULTIPLE_BLOCK */
+#define CMD32		(32)				/* ERASE_ER_BLK_START */
+#define CMD33		(33)				/* ERASE_ER_BLK_END */
+#define CMD38		(38)				/* ERASE */
+#define CMD55		(55)				/* APP_CMD */
+#define CMD58		(58)				/* READ_OCR */
 
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
@@ -141,9 +144,9 @@ DSTATUS USER_initialize (BYTE pdrv)
 	
 	enum initialization_state 
 	{
-		SD_INIT = 0,
-		SD_DUMMY_CLOCK,
+		SD_POWER_CYCLE = 0,
 		SD_SEND_CMD0,
+		SD_WAIT_CMD0_ANSWER,
 		SD_SEND_CMD8,
 		SD_SEND_ACMD41,
 		SD_SEND_CMD1,
@@ -154,9 +157,7 @@ DSTATUS USER_initialize (BYTE pdrv)
 	} init_phase;
 	
 	uint8_t response = 0x00;
-	init_phase = SD_INIT;
-	
-	uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+	init_phase = SD_POWER_CYCLE;
 	
 	spi_init();
 	
@@ -164,24 +165,22 @@ DSTATUS USER_initialize (BYTE pdrv)
 	{
 		switch(init_phase)
 		{
-			case SD_INIT:
+			case SD_POWER_CYCLE:
 				// Wait 1 ms
 				HAL_Delay(1);
-				init_phase = SD_DUMMY_CLOCK;
-				break;
-			case SD_DUMMY_CLOCK:
 				HAL_SPI_Transmit(&hspi2, dummy_clocks, sizeof(dummy_clocks), 10);
 				init_phase = SD_SEND_CMD0;
 				break;
 			case SD_SEND_CMD0:
 				CS_LOW();
 				HAL_SPI_Transmit(&hspi2, CMD0, sizeof(CMD0), 10);
+				init_phase = SD_WAIT_CMD0_ANSWER;
+				break;
+			case SD_WAIT_CMD0_ANSWER:
+				HAL_SPI_Transmit(&hspi2, CMD_ANSWER, sizeof(CMD_ANSWER), 10);
 				HAL_SPI_Receive(&hspi2,&response,sizeof(response),10);
-				CS_HIGH();
-			  if(response == 0x01)
+				if(response == 0x01)
 					init_phase = SD_SEND_ACMD41;
-				else
-					init_phase = SD_ERROR;
 				break;
 			case SD_SEND_ACMD41:
 				break;
@@ -193,7 +192,7 @@ DSTATUS USER_initialize (BYTE pdrv)
 				break;
 			default:
 					// Something went wrong - Try to re-init
-					init_phase = SD_INIT;
+					init_phase = SD_POWER_CYCLE;
 					spi_init();
 				break;				
 		}
