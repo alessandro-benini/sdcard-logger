@@ -1,7 +1,7 @@
 #ifndef __GIT_H
 #define __GIT_H
-const char * build_date = "20/10/2017";
-const char * build_time = "22:52:50,26";
-const char * build_git_sha = "51c50dda0c17e380d7d0323db73f9813bd7b4488";
-const char * build_git_sha_short = "51c50dd";
+const char * build_date = "21/10/2017";
+const char * build_time = "13:22:05,15";
+const char * build_git_sha = "45e3e431dd5411ad8efaa0eea7c95678e1e7ced1";
+const char * build_git_sha_short = "45e3e43";
 #endif __GIT_H

@@ -70,11 +70,15 @@
 #define CS_HIGH() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
 #define CS_LOW()  HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
 
-uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-uint8_t CMD0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
-uint8_t CMD_ANSWER[] = {0xFF};
+#define DEFAULT_TIMEOUT 10
 
-#define CMD1		0x41	/* SEND_OP_COND (MMC) */
+uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+// uint8_t CMD0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
+// uint8_t CMD8[] = {0x48, 0x00, 0x00, 0x00, 0x00, 0x95};
+// uint8_t CMD_ANSWER[] = {0xFF};
+
+#define CMD0		(0)
+#define CMD1		(1)	/* SEND_OP_COND (MMC) */
 #define	ACMD41	(0x80+41)		/* SEND_OP_COND (SDC) */
 #define CMD8		(8)					/* SEND_IF_COND */
 #define CMD9		(9)					/* SEND_CSD */
@@ -126,7 +130,8 @@ Diskio_drvTypeDef  USER_Driver =
 #endif /* _USE_IOCTL == 1 */
 };
 
-int spi_init(void);
+void spi_init(void);
+uint8_t send_cmd(BYTE cmd, DWORD arg);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -157,6 +162,7 @@ DSTATUS USER_initialize (BYTE pdrv)
 	} init_phase;
 	
 	uint8_t response = 0x00;
+	DWORD arg = 0;
 	init_phase = SD_POWER_CYCLE;
 	
 	spi_init();
@@ -173,22 +179,21 @@ DSTATUS USER_initialize (BYTE pdrv)
 				break;
 			case SD_SEND_CMD0:
 				CS_LOW();
-				HAL_SPI_Transmit(&hspi2, CMD0, sizeof(CMD0), 10);
-				init_phase = SD_WAIT_CMD0_ANSWER;
-				break;
-			case SD_WAIT_CMD0_ANSWER:
-				HAL_SPI_Transmit(&hspi2, CMD_ANSWER, sizeof(CMD_ANSWER), 10);
-				HAL_SPI_Receive(&hspi2,&response,sizeof(response),10);
+				response = send_cmd(CMD0,arg);
 				if(response == 0x01)
-					init_phase = SD_SEND_ACMD41;
-				break;
-			case SD_SEND_ACMD41:
+					init_phase = SD_SEND_CMD8;
+				else
+					init_phase = SD_ERROR;
 				break;
 			case SD_SEND_CMD8:
 				break;
 			case SD_SEND_CMD58:
 				break;
 			case SD_SEND_CMD16:
+				break;
+			case SD_ERROR:
+				CS_HIGH();
+				Stat = STA_NODISK;
 				break;
 			default:
 					// Something went wrong - Try to re-init
@@ -281,11 +286,59 @@ DRESULT USER_ioctl (
 }
 #endif /* _USE_IOCTL == 1 */
 
-int spi_init(void)
+void spi_init(void)
 {
 	CS_HIGH();
 	HAL_Delay(10);
-	return 0;
+}
+
+uint8_t send_cmd(BYTE cmd, DWORD arg)
+{
+	// cmd packet is of fixed lenght
+	uint8_t cmd_packet[6] = {0};
+	
+	// Response
+	uint8_t cmd_response[] = {0xFF};
+	uint8_t response = 0xFF;
+	
+	// First byte is the command
+	// The cmd_packet must start with 01, therefore we add 0x40 to the cmd byte
+	cmd_packet[0] = 0x40 | cmd;
+	
+	// Four bytes for the argument
+	for(uint8_t i = 0; i<4; i++)
+		cmd_packet[i+1] = (uint8_t) arg << (i+1)*8;
+	
+	// Add crc: it must be correct for CMD0 and CMD 8 only, for other commands, we use a dummy crc (0x01)
+	switch(cmd)
+	{
+		case CMD0:
+			cmd_packet[5] = 0x95;
+			break;
+		case CMD8:
+			cmd_packet[5] = 0x87;
+			break;
+		default:
+			cmd_packet[5] = 0x01;
+	}
+	
+	// Send the command
+	HAL_SPI_Transmit(&hspi2, cmd_packet, sizeof(cmd_packet), DEFAULT_TIMEOUT);
+	
+	// Receive the answer from SDcard
+	
+	// Try 3 times to get the answer
+	for(uint8_t j = 0; j<3; j++)
+	{
+		HAL_SPI_Transmit(&hspi2, cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+		HAL_SPI_Receive(&hspi2,&response,sizeof(response),DEFAULT_TIMEOUT);
+		
+		// A correct answer must be different from 0xFF
+		if(response != 0xFF)
+			break;
+	}
+	
+	return response;	
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
