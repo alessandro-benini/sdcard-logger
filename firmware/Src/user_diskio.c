@@ -186,6 +186,8 @@ DSTATUS USER_initialize (BYTE pdrv)
 					init_phase = SD_ERROR;
 				break;
 			case SD_SEND_CMD8:
+				arg = 0x000001AA;
+				response = send_cmd(CMD8,arg);
 				break;
 			case SD_SEND_CMD58:
 				break;
@@ -298,47 +300,53 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 	uint8_t cmd_packet[6] = {0};
 	
 	// Response
-	uint8_t cmd_response[] = {0xFF};
-	uint8_t response = 0xFF;
+	uint8_t cmd_response = 0xFF;
+	// R1 is 1 byte only and it is used for most commands
+	uint8_t r1 = 0xFF;
+	// Commands R3 and R7 are 5 bytes long, (R1 + trailing 32-bit data)
+	uint8_t r3_7[5] = {0};
 	
 	// First byte is the command
 	// The cmd_packet must start with 01, therefore we add 0x40 to the cmd byte
 	cmd_packet[0] = 0x40 | cmd;
 	
 	// Four bytes for the argument
-	for(uint8_t i = 0; i<4; i++)
-		cmd_packet[i+1] = (uint8_t) arg << (i+1)*8;
+	for(uint8_t i = 1; i<=4; i++)
+		cmd_packet[i] = (uint8_t)(arg >> (4-i)*8);
 	
-	// Add crc: it must be correct for CMD0 and CMD 8 only, for other commands, we use a dummy crc (0x01)
-	switch(cmd)
-	{
-		case CMD0:
-			cmd_packet[5] = 0x95;
-			break;
-		case CMD8:
-			cmd_packet[5] = 0x87;
-			break;
-		default:
-			cmd_packet[5] = 0x01;
-	}
+	// Add crc: it must be correct for CMD0 and CMD 8 only; for other commands, we use a dummy crc (0x01)
+	if(cmd == CMD0)
+		cmd_packet[5] = 0x95;
+	else if(cmd == CMD8)
+		cmd_packet[5] = 0x87;
+	else
+		cmd_packet[5] = 0x01;
 	
 	// Send the command
 	HAL_SPI_Transmit(&hspi2, cmd_packet, sizeof(cmd_packet), DEFAULT_TIMEOUT);
 	
 	// Receive the answer from SDcard
 	
-	// Try 3 times to get the answer
-	for(uint8_t j = 0; j<3; j++)
+	switch(cmd)
 	{
-		HAL_SPI_Transmit(&hspi2, cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-		HAL_SPI_Receive(&hspi2,&response,sizeof(response),DEFAULT_TIMEOUT);
-		
-		// A correct answer must be different from 0xFF
-		if(response != 0xFF)
+		case CMD0:
+			// Try 3 times to get the answer
+			for(uint8_t j = 0; j<3; j++)
+			{
+				HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+				HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
+				if(r1 != 0xFF)
+					return r1;
+			}
+			break;
+			
+		case CMD8:
+			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+			HAL_SPI_Receive(&hspi2,r3_7,sizeof(r3_7),DEFAULT_TIMEOUT);
+			if( (DWORD)r3_7 == 0x000001AA)
+				return r3_7[0];
 			break;
 	}
-	
-	return response;	
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
