@@ -73,30 +73,25 @@
 #define DEFAULT_TIMEOUT 10
 
 uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-// uint8_t CMD0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
-// uint8_t CMD8[] = {0x48, 0x00, 0x00, 0x00, 0x00, 0x95};
-// uint8_t CMD_ANSWER[] = {0xFF};
 
-#define CMD0		(0)
-#define CMD1		(1)	/* SEND_OP_COND (MMC) */
-#define	ACMD41	(0x80+41)		/* SEND_OP_COND (SDC) */
-#define CMD8		(8)					/* SEND_IF_COND */
-#define CMD9		(9)					/* SEND_CSD */
-#define CMD10		(10)				/* SEND_CID */
-#define CMD12		(12)				/* STOP_TRANSMISSION */
-#define ACMD13	(0x80+13)		/* SD_STATUS (SDC) */
-#define CMD16		(16)				/* SET_BLOCKLEN */
-#define CMD17		(17)				/* READ_SINGLE_BLOCK */
-#define CMD18		(18)				/* READ_MULTIPLE_BLOCK */
-#define CMD23		(23)				/* SET_BLOCK_COUNT (MMC) */
-#define	ACMD23	(0x80+23)		/* SET_WR_BLK_ERASE_COUNT (SDC) */
-#define CMD24		(24)				/* WRITE_BLOCK */
-#define CMD25		(25)				/* WRITE_MULTIPLE_BLOCK */
-#define CMD32		(32)				/* ERASE_ER_BLK_START */
-#define CMD33		(33)				/* ERASE_ER_BLK_END */
-#define CMD38		(38)				/* ERASE */
-#define CMD55		(55)				/* APP_CMD */
-#define CMD58		(58)				/* READ_OCR */
+/* Definitions for MMC/SDC command */
+#define CMD0	  (0)	  /* GO_IDLE_STATE */
+#define CMD1	  (1)	  /* SEND_OP_COND (MMC) */
+#define	ACMD41	(41)	    /* SEND_OP_COND (SDC) */
+#define CMD8	  (8)	  /* SEND_IF_COND */
+#define CMD9	  (9)	  /* SEND_CSD */
+#define CMD10	  (10)	  /* SEND_CID */
+#define CMD12	  (12)	  /* STOP_TRANSMISSION */
+#define ACMD13	(13)	  /* SD_STATUS (SDC) */
+#define CMD16	  (16)	  /* SET_BLOCKLEN */
+#define CMD17	  (17)	  /* READ_SINGLE_BLOCK */
+#define CMD18	  (18)	  /* READ_MULTIPLE_BLOCK */
+#define CMD23	  (23)	  /* SET_BLOCK_COUNT (MMC) */
+#define	ACMD23	(23)	  /* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define CMD24	  (24)	  /* WRITE_BLOCK */
+#define CMD25	  (25)	  /* WRITE_MULTIPLE_BLOCK */
+#define CMD55	  (55)	  /* APP_CMD */
+#define CMD58   (58)	  /* READ_OCR */
 
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
@@ -153,6 +148,7 @@ DSTATUS USER_initialize (BYTE pdrv)
 		SD_SEND_CMD0,
 		SD_WAIT_CMD0_ANSWER,
 		SD_SEND_CMD8,
+		SD_SEND_CMD55,
 		SD_SEND_ACMD41,
 		SD_SEND_CMD1,
 		SD_SEND_CMD58,
@@ -188,10 +184,35 @@ DSTATUS USER_initialize (BYTE pdrv)
 			case SD_SEND_CMD8:
 				arg = 0x000001AA;
 				response = send_cmd(CMD8,arg);
+				if(response == 0x01)
+					init_phase = SD_SEND_CMD55;
+				else
+					init_phase = SD_ERROR;
+				break;
+			case SD_SEND_CMD55:	
+				arg = 0x00000000;
+				response = send_cmd(CMD55,arg);
+				if(response == 0x01)
+				{
+					init_phase = SD_SEND_ACMD41;
+				}
+				else
+					init_phase = SD_ERROR;
+				break;
+			case SD_SEND_ACMD41:
+				arg = 0x40000000;
+				response = send_cmd(ACMD41,arg);
+				if(response == 0x00)
+					init_phase = SD_SEND_CMD58;
+				else
+				{
+					// HAL_Delay(1000);
+					init_phase = SD_SEND_CMD55;
+				}
 				break;
 			case SD_SEND_CMD58:
-				break;
-			case SD_SEND_CMD16:
+				arg = 0x00000000;
+				response = send_cmd(CMD58,arg);
 				break;
 			case SD_ERROR:
 				CS_HIGH();
@@ -319,6 +340,8 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 		cmd_packet[5] = 0x95;
 	else if(cmd == CMD8)
 		cmd_packet[5] = 0x87;
+	else if(cmd == ACMD41)
+		cmd_packet[5] = 0x95;
 	else
 		cmd_packet[5] = 0x01;
 	
@@ -329,6 +352,7 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 	
 	switch(cmd)
 	{
+		
 		case CMD0:
 			// Try 3 times to get the answer
 			for(uint8_t j = 0; j<3; j++)
@@ -343,9 +367,43 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 		case CMD8:
 			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
 			HAL_SPI_Receive(&hspi2,r3_7,sizeof(r3_7),DEFAULT_TIMEOUT);
-			if( (DWORD)r3_7 == 0x000001AA)
-				return r3_7[0];
+			if( r3_7[3] == 0x01 && r3_7[4] == 0xAA)
+				return 0x01;
 			break;
+			
+		case CMD55:
+			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+			HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
+			if(r1 != 0xFF)
+				return r1;
+			break;
+			
+		case ACMD41:		
+			for(int i = 0; i<150; i++)
+			{
+				HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+				HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
+			  if(r1 == 0x00)
+				return r1;
+				else
+					HAL_Delay(10);
+			}
+			return 0xFF;
+			
+			// HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
+			// if(r1 != 0xFF)
+			//	return r1;
+			break;
+			
+		case CMD58:
+			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
+			HAL_SPI_Receive(&hspi2,r3_7,sizeof(r3_7),DEFAULT_TIMEOUT);
+			if( r3_7[1] & (1<<7))
+				return 0x01;
+			else
+				return 0x00;
+			break;
+			
 	}
 }
 
