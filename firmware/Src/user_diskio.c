@@ -144,7 +144,7 @@ DSTATUS USER_initialize (BYTE pdrv)
 	
 	enum initialization_state 
 	{
-		SD_POWER_CYCLE = 0,
+    SD_POWER_CYCLE = 0,
 		SD_SEND_CMD0,
 		SD_WAIT_CMD0_ANSWER,
 		SD_SEND_CMD8,
@@ -200,16 +200,20 @@ DSTATUS USER_initialize (BYTE pdrv)
 					init_phase = SD_ERROR;
 				break;
 			case SD_SEND_ACMD41:
+        
+        // HAL_Delay(2000);
 				arg = 0x40000000;
 				response = send_cmd(ACMD41,arg);
+      
 				if(response == 0x00)
 					init_phase = SD_SEND_CMD58;
-				else
-				{
-					// HAL_Delay(1000);
-					init_phase = SD_SEND_CMD55;
-				}
+				else if(response == 0x01)
+          init_phase = SD_SEND_CMD55;
+        else
+          init_phase = SD_ERROR;
+        
 				break;
+        
 			case SD_SEND_CMD58:
 				arg = 0x00000000;
 				response = send_cmd(CMD58,arg);
@@ -329,7 +333,7 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 	
 	// First byte is the command
 	// The cmd_packet must start with 01, therefore we add 0x40 to the cmd byte
-	cmd_packet[0] = 0x40 | cmd;
+  cmd_packet[0] = 0x40 | cmd;
 	
 	// Four bytes for the argument
 	for(uint8_t i = 1; i<=4; i++)
@@ -340,8 +344,10 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 		cmd_packet[5] = 0x95;
 	else if(cmd == CMD8)
 		cmd_packet[5] = 0x87;
+  else if(cmd == CMD55)
+    cmd_packet[5] = 0x65;
 	else if(cmd == ACMD41)
-		cmd_packet[5] = 0x95;
+		cmd_packet[5] = 0x77;
 	else
 		cmd_packet[5] = 0x01;
 	
@@ -379,21 +385,10 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 			break;
 			
 		case ACMD41:		
-			for(int i = 0; i<150; i++)
-			{
 				HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
 				HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
-			  if(r1 == 0x00)
 				return r1;
-				else
-					HAL_Delay(10);
-			}
-			return 0xFF;
-			
-			// HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
-			// if(r1 != 0xFF)
-			//	return r1;
-			break;
+      break;
 			
 		case CMD58:
 			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
