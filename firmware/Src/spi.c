@@ -111,6 +111,30 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* spiHandle)
   }
 }
 
+void set_spi_clock_slow()
+{  
+  if (HAL_SPI_DeInit(&hspi2) != HAL_OK)
+    _Error_Handler(__FILE__, __LINE__);
+  
+  // Set the SPI to 256 Kbit/s (used during initializaton in SPI mode
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+  
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+    _Error_Handler(__FILE__, __LINE__); 
+}
+
+void set_spi_clock_fast()
+{
+  if (HAL_SPI_DeInit(&hspi2) != HAL_OK)
+    _Error_Handler(__FILE__, __LINE__);
+  
+  // Set the SPI to 16 Mbit/s (used during initializaton in SPI mode
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+    _Error_Handler(__FILE__, __LINE__);
+}
+
 void HAL_SPI_MspDeInit(SPI_HandleTypeDef* spiHandle)
 {
 

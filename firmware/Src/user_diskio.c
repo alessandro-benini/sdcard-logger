@@ -65,6 +65,8 @@
 #include <string.h>
 #include "ff_gen_drv.h"
 
+#include "spi.h"
+
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 #define CS_HIGH() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
@@ -75,23 +77,23 @@
 uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 /* Definitions for MMC/SDC command */
-#define CMD0	  (0)	  /* GO_IDLE_STATE */
-#define CMD1	  (1)	  /* SEND_OP_COND (MMC) */
-#define	ACMD41	(41)	    /* SEND_OP_COND (SDC) */
-#define CMD8	  (8)	  /* SEND_IF_COND */
-#define CMD9	  (9)	  /* SEND_CSD */
-#define CMD10	  (10)	  /* SEND_CID */
-#define CMD12	  (12)	  /* STOP_TRANSMISSION */
-#define ACMD13	(13)	  /* SD_STATUS (SDC) */
-#define CMD16	  (16)	  /* SET_BLOCKLEN */
-#define CMD17	  (17)	  /* READ_SINGLE_BLOCK */
-#define CMD18	  (18)	  /* READ_MULTIPLE_BLOCK */
-#define CMD23	  (23)	  /* SET_BLOCK_COUNT (MMC) */
-#define	ACMD23	(23)	  /* SET_WR_BLK_ERASE_COUNT (SDC) */
-#define CMD24	  (24)	  /* WRITE_BLOCK */
-#define CMD25	  (25)	  /* WRITE_MULTIPLE_BLOCK */
-#define CMD55	  (55)	  /* APP_CMD */
-#define CMD58   (58)	  /* READ_OCR */
+#define CMD0	  0   /* GO_IDLE_STATE */
+#define CMD1	  1   /* SEND_OP_COND (MMC) */
+#define	ACMD41	41  /* SEND_OP_COND (SDC) */
+#define CMD8	  8   /* SEND_IF_COND */
+#define CMD9	  9   /* SEND_CSD */
+#define CMD10	  10  /* SEND_CID */
+#define CMD12	  12  /* STOP_TRANSMISSION */
+#define ACMD13	13  /* SD_STATUS (SDC) */
+#define CMD16	  16  /* SET_BLOCKLEN */
+#define CMD17	  17  /* READ_SINGLE_BLOCK */
+#define CMD18	  18  /* READ_MULTIPLE_BLOCK */
+#define CMD23	  23  /* SET_BLOCK_COUNT (MMC) */
+#define	ACMD23	23  /* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define CMD24	  24  /* WRITE_BLOCK */
+#define CMD25	  25  /* WRITE_MULTIPLE_BLOCK */
+#define CMD55	  55  /* APP_CMD */
+#define CMD58   58  /* READ_OCR */
 
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
@@ -126,7 +128,7 @@ Diskio_drvTypeDef  USER_Driver =
 };
 
 void spi_init(void);
-uint8_t send_cmd(BYTE cmd, DWORD arg);
+void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -135,101 +137,115 @@ uint8_t send_cmd(BYTE cmd, DWORD arg);
   * @param  pdrv: Physical drive number (0..)
   * @retval DSTATUS: Operation status
   */
-
-
 DSTATUS USER_initialize (BYTE pdrv)
 {
   /* USER CODE BEGIN INIT */
   Stat = STA_NOINIT;
-	
-	enum initialization_state 
-	{
+
+  enum initialization_state 
+  {
     SD_POWER_CYCLE = 0,
-		SD_SEND_CMD0,
-		SD_WAIT_CMD0_ANSWER,
-		SD_SEND_CMD8,
-		SD_SEND_CMD55,
-		SD_SEND_ACMD41,
-		SD_SEND_CMD1,
-		SD_SEND_CMD58,
-		SD_SEND_CMD16,
-		SD_SUCCESS,
-		SD_ERROR,		
-	} init_phase;
-	
-	uint8_t response = 0x00;
-	DWORD arg = 0;
-	init_phase = SD_POWER_CYCLE;
-	
-	spi_init();
-	
-	while(init_phase < SD_SUCCESS)
-	{
-		switch(init_phase)
-		{
-			case SD_POWER_CYCLE:
-				// Wait 1 ms
-				HAL_Delay(1);
-				HAL_SPI_Transmit(&hspi2, dummy_clocks, sizeof(dummy_clocks), 10);
-				init_phase = SD_SEND_CMD0;
-				break;
-			case SD_SEND_CMD0:
-				CS_LOW();
-				response = send_cmd(CMD0,arg);
-				if(response == 0x01)
-					init_phase = SD_SEND_CMD8;
-				else
-					init_phase = SD_ERROR;
-				break;
-			case SD_SEND_CMD8:
-				arg = 0x000001AA;
-				response = send_cmd(CMD8,arg);
-				if(response == 0x01)
-					init_phase = SD_SEND_CMD55;
-				else
-					init_phase = SD_ERROR;
-				break;
-			case SD_SEND_CMD55:	
-				arg = 0x00000000;
-				response = send_cmd(CMD55,arg);
-				if(response == 0x01)
-				{
-					init_phase = SD_SEND_ACMD41;
-				}
-				else
-					init_phase = SD_ERROR;
-				break;
-			case SD_SEND_ACMD41:
-        
-        // HAL_Delay(2000);
-				arg = 0x40000000;
-				response = send_cmd(ACMD41,arg);
-      
-				if(response == 0x00)
-					init_phase = SD_SEND_CMD58;
-				else if(response == 0x01)
+    SD_SEND_CMD0,
+    SD_SEND_CMD8,
+    SD_SEND_CMD55,
+    SD_SEND_ACMD41,
+    SD_SEND_CMD1,
+    SD_SEND_CMD58,
+    SD_SEND_CMD16,
+    SD_SUCCESS,
+    SD_ERROR,		
+  } init_phase;
+
+  uint8_t r1 = 0xFF;
+  uint8_t r3_7[5] = {0};
+  
+  DWORD arg = 0;
+  init_phase = SD_POWER_CYCLE;
+
+  // Set SPI clock rate to 250 Kbit/s for the initialization phase
+  set_spi_clock_slow();
+  
+  spi_init();
+
+  while(init_phase < SD_SUCCESS)
+  {
+    switch(init_phase)
+    {
+      case SD_POWER_CYCLE:
+        // Wait 1 ms
+        HAL_Delay(1);
+        HAL_SPI_Transmit(&hspi2, dummy_clocks, sizeof(dummy_clocks), 10);
+        init_phase = SD_SEND_CMD0;
+        break;
+      case SD_SEND_CMD0:
+        CS_LOW();
+        send_cmd(CMD0,arg,(uint8_t*)&r1,sizeof(r1));
+        if(r1 == 0x01)
+          init_phase = SD_SEND_CMD8;
+        else
+          init_phase = SD_ERROR;
+        break;
+      case SD_SEND_CMD8:
+        arg = 0x000001AA;
+        send_cmd(CMD8,arg,r3_7,sizeof(r3_7)); 
+        if(r3_7[3] == 0x01 && r3_7[4] == 0xAA)
           init_phase = SD_SEND_CMD55;
         else
           init_phase = SD_ERROR;
-        
-				break;
-        
-			case SD_SEND_CMD58:
-				arg = 0x00000000;
-				response = send_cmd(CMD58,arg);
-				break;
-			case SD_ERROR:
-				CS_HIGH();
-				Stat = STA_NODISK;
-				break;
-			default:
-					// Something went wrong - Try to re-init
-					init_phase = SD_POWER_CYCLE;
-					spi_init();
-				break;				
-		}
-	}
-	
+        break;
+      case SD_SEND_CMD55:	
+        arg = 0x00000000;
+        send_cmd(CMD55,arg,(uint8_t*)&r1,sizeof(r1));
+        if(r1 == 0x01)
+          init_phase = SD_SEND_ACMD41;
+        else
+          init_phase = SD_ERROR;
+        break;
+      case SD_SEND_ACMD41:
+        arg = 0x40000000;
+        send_cmd(ACMD41,arg,(uint8_t*)&r1,sizeof(r1));
+        if(r1 == 0x00)
+          init_phase = SD_SEND_CMD58;
+        else if(r1 == 0x01)
+          init_phase = SD_SEND_CMD55;
+        else
+          init_phase = SD_ERROR;
+        break;
+      case SD_SEND_CMD58:
+        arg = 0x00000000;
+        send_cmd(CMD58,arg,r3_7,sizeof(r3_7));
+        if(r3_7[1] & (1<<6))
+        {
+          // SD Version 2+ (Block address)
+          Stat = ~STA_NOINIT;
+          init_phase = SD_SUCCESS;
+        }
+        else
+          // SD Version 2+ (byte address)
+          init_phase = SD_SEND_CMD16;
+        break;
+      case SD_SEND_CMD16:
+        // Force block size to 512 bytes to work with FAT file system
+        arg = 0x00000200;
+        send_cmd(CMD16,arg,(uint8_t*)&r1,sizeof(r1));
+        break;
+      case SD_ERROR:
+        Stat = STA_NODISK;
+        break;
+      default:
+        // Something went wrong - Try to re-init
+        init_phase = SD_POWER_CYCLE;
+        spi_init();
+      break;				
+    } 
+  }
+
+  // De-assert chip select line
+  CS_HIGH();
+  
+  // Set SPI clock back to 16Mbit/s for standard use
+  set_spi_clock_fast();
+  
   return Stat;
   /* USER CODE END INIT */
 }
@@ -239,9 +255,7 @@ DSTATUS USER_initialize (BYTE pdrv)
   * @param  pdrv: Physical drive number (0..)
   * @retval DSTATUS: Operation status
   */
-DSTATUS USER_status (
-	BYTE pdrv       /* Physical drive nmuber to identify the drive */
-)
+DSTATUS USER_status (BYTE pdrv)
 {
   /* USER CODE BEGIN STATUS */
   Stat = STA_NOINIT;
@@ -257,12 +271,7 @@ DSTATUS USER_status (
   * @param  count: Number of sectors to read (1..128)
   * @retval DRESULT: Operation result
   */
-DRESULT USER_read (
-	BYTE pdrv,      /* Physical drive nmuber to identify the drive */
-	BYTE *buff,     /* Data buffer to store read data */
-	DWORD sector,   /* Sector address in LBA */
-	UINT count      /* Number of sectors to read */
-)
+DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
 {
   /* USER CODE BEGIN READ */
   return RES_OK;
@@ -278,12 +287,7 @@ DRESULT USER_read (
   * @retval DRESULT: Operation result
   */
 #if _USE_WRITE == 1
-DRESULT USER_write (
-	BYTE pdrv,          /* Physical drive nmuber to identify the drive */
-	const BYTE *buff,   /* Data to be written */
-	DWORD sector,       /* Sector address in LBA */
-	UINT count          /* Number of sectors to write */
-)
+DRESULT USER_write (BYTE pdrv,const BYTE *buff,DWORD sector,UINT count)
 { 
   /* USER CODE BEGIN WRITE */
   /* USER CODE HERE */
@@ -300,11 +304,7 @@ DRESULT USER_write (
   * @retval DRESULT: Operation result
   */
 #if _USE_IOCTL == 1
-DRESULT USER_ioctl (
-	BYTE pdrv,      /* Physical drive nmuber (0..) */
-	BYTE cmd,       /* Control code */
-	void *buff      /* Buffer to send/receive control data */
-)
+DRESULT USER_ioctl (BYTE pdrv,BYTE cmd,void *buff)
 {
   /* USER CODE BEGIN IOCTL */
    DRESULT res = RES_ERROR;
@@ -319,17 +319,19 @@ void spi_init(void)
 	HAL_Delay(10);
 }
 
-uint8_t send_cmd(BYTE cmd, DWORD arg)
+/**
+  * @brief  Send a command to the SD cards using SPI protocol
+  * @param  cmd: Command to be sent
+  * @param  arg: Argument (4 bytes)
+  * @param  res: Pointer to the array that will contain the response
+  * @param  len: lenght of the array that will contain the response
+  * @retval None
+  */
+void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len)
 {
 	// cmd packet is of fixed lenght
 	uint8_t cmd_packet[6] = {0};
-	
-	// Response
-	uint8_t cmd_response = 0xFF;
-	// R1 is 1 byte only and it is used for most commands
-	uint8_t r1 = 0xFF;
-	// Commands R3 and R7 are 5 bytes long, (R1 + trailing 32-bit data)
-	uint8_t r3_7[5] = {0};
+	uint8_t MOSI_high = 0xFF;
 	
 	// First byte is the command
 	// The cmd_packet must start with 01, therefore we add 0x40 to the cmd byte
@@ -339,67 +341,22 @@ uint8_t send_cmd(BYTE cmd, DWORD arg)
 	for(uint8_t i = 1; i<=4; i++)
 		cmd_packet[i] = (uint8_t)(arg >> (4-i)*8);
 	
-	// Add crc: it must be correct for CMD0 and CMD 8 only; for other commands, we use a dummy crc (0x01)
-	if(cmd == CMD0)
-		cmd_packet[5] = 0x95;
-	else if(cmd == CMD8)
-		cmd_packet[5] = 0x87;
-  else if(cmd == CMD55)
+	// Add crc: it must be correct for CMD0 and CMD 8 only; for other commands, a dummy crc (0x01) is set
+	if(cmd == CMD0)        
+    cmd_packet[5] = 0x95;
+	else if(cmd == CMD8)   
+    cmd_packet[5] = 0x87;
+  else if(cmd == CMD55)  
     cmd_packet[5] = 0x65;
-	else if(cmd == ACMD41)
-		cmd_packet[5] = 0x77;
-	else
-		cmd_packet[5] = 0x01;
+	else if(cmd == ACMD41) 
+    cmd_packet[5] = 0x77;
+	else                   
+    cmd_packet[5] = 0x01;
 	
 	// Send the command
-	HAL_SPI_Transmit(&hspi2, cmd_packet, sizeof(cmd_packet), DEFAULT_TIMEOUT);
-	
-	// Receive the answer from SDcard
-	
-	switch(cmd)
-	{
-		
-		case CMD0:
-			// Try 3 times to get the answer
-			for(uint8_t j = 0; j<3; j++)
-			{
-				HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-				HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
-				if(r1 != 0xFF)
-					return r1;
-			}
-			break;
-			
-		case CMD8:
-			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-			HAL_SPI_Receive(&hspi2,r3_7,sizeof(r3_7),DEFAULT_TIMEOUT);
-			if( r3_7[3] == 0x01 && r3_7[4] == 0xAA)
-				return 0x01;
-			break;
-			
-		case CMD55:
-			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-			HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
-			if(r1 != 0xFF)
-				return r1;
-			break;
-			
-		case ACMD41:		
-				HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-				HAL_SPI_Receive(&hspi2,&r1,sizeof(r1),DEFAULT_TIMEOUT);
-				return r1;
-      break;
-			
-		case CMD58:
-			HAL_SPI_Transmit(&hspi2, (uint8_t*)&cmd_response, sizeof(cmd_response), DEFAULT_TIMEOUT);
-			HAL_SPI_Receive(&hspi2,r3_7,sizeof(r3_7),DEFAULT_TIMEOUT);
-			if( r3_7[1] & (1<<7))
-				return 0x01;
-			else
-				return 0x00;
-			break;
-			
-	}
+  HAL_SPI_Transmit(&hspi2, cmd_packet, sizeof(cmd_packet), DEFAULT_TIMEOUT);
+  HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
+  HAL_SPI_Receive(&hspi2, res, res_len, DEFAULT_TIMEOUT);
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

@@ -73,6 +73,9 @@ void MX_SPI2_Init(void);
 
 /* USER CODE BEGIN Prototypes */
 
+void set_spi_clock_slow();
+void set_spi_clock_fast();
+
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
