@@ -79,17 +79,17 @@ uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 /* Definitions for MMC/SDC command */
 #define CMD0	  0   /* GO_IDLE_STATE */
 #define CMD1	  1   /* SEND_OP_COND (MMC) */
-#define	ACMD41	41  /* SEND_OP_COND (SDC) */
+#define	ACMD41  41  /* SEND_OP_COND (SDC) */
 #define CMD8	  8   /* SEND_IF_COND */
 #define CMD9	  9   /* SEND_CSD */
 #define CMD10	  10  /* SEND_CID */
 #define CMD12	  12  /* STOP_TRANSMISSION */
-#define ACMD13	13  /* SD_STATUS (SDC) */
+#define ACMD13  13  /* SD_STATUS (SDC) */
 #define CMD16	  16  /* SET_BLOCKLEN */
 #define CMD17	  17  /* READ_SINGLE_BLOCK */
 #define CMD18	  18  /* READ_MULTIPLE_BLOCK */
 #define CMD23	  23  /* SET_BLOCK_COUNT (MMC) */
-#define	ACMD23	23  /* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define	ACMD23  23  /* SET_WR_BLK_ERASE_COUNT (SDC) */
 #define CMD24	  24  /* WRITE_BLOCK */
 #define CMD25	  25  /* WRITE_MULTIPLE_BLOCK */
 #define CMD55	  55  /* APP_CMD */
@@ -228,6 +228,8 @@ DSTATUS USER_initialize (BYTE pdrv)
         // Force block size to 512 bytes to work with FAT file system
         arg = 0x00000200;
         send_cmd(CMD16,arg,(uint8_t*)&r1,sizeof(r1));
+        Stat = ~STA_NOINIT;
+        init_phase = SD_SUCCESS;
         break;
       case SD_ERROR:
         Stat = STA_NODISK;
