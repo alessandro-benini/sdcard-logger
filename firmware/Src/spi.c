@@ -111,7 +111,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* spiHandle)
   }
 }
 
-void set_spi_clock_slow()
+void set_spi_clock_slow(void)
 {  
   if (HAL_SPI_DeInit(&hspi2) != HAL_OK)
     _Error_Handler(__FILE__, __LINE__);
@@ -123,7 +123,7 @@ void set_spi_clock_slow()
     _Error_Handler(__FILE__, __LINE__); 
 }
 
-void set_spi_clock_fast()
+void set_spi_clock_fast(void)
 {
   if (HAL_SPI_DeInit(&hspi2) != HAL_OK)
     _Error_Handler(__FILE__, __LINE__);

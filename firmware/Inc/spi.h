@@ -73,8 +73,8 @@ void MX_SPI2_Init(void);
 
 /* USER CODE BEGIN Prototypes */
 
-void set_spi_clock_slow();
-void set_spi_clock_fast();
+void set_spi_clock_slow(void);
+void set_spi_clock_fast(void);
 
 /* USER CODE END Prototypes */
 

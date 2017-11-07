@@ -63,6 +63,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <string.h>
+#include <stdlib.h>
 #include "ff_gen_drv.h"
 
 #include "spi.h"
@@ -74,12 +75,10 @@
 
 #define DEFAULT_TIMEOUT 10
 
-uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-
 /* Definitions for MMC/SDC command */
 #define CMD0	  0   /* GO_IDLE_STATE */
 #define CMD1	  1   /* SEND_OP_COND (MMC) */
-#define	ACMD41  41  /* SEND_OP_COND (SDC) */
+#define ACMD41  41  /* SEND_OP_COND (SDC) */
 #define CMD8	  8   /* SEND_IF_COND */
 #define CMD9	  9   /* SEND_CSD */
 #define CMD10	  10  /* SEND_CID */
@@ -89,11 +88,14 @@ uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 #define CMD17	  17  /* READ_SINGLE_BLOCK */
 #define CMD18	  18  /* READ_MULTIPLE_BLOCK */
 #define CMD23	  23  /* SET_BLOCK_COUNT (MMC) */
-#define	ACMD23  23  /* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define ACMD23  23  /* SET_WR_BLK_ERASE_COUNT (SDC) */
 #define CMD24	  24  /* WRITE_BLOCK */
 #define CMD25	  25  /* WRITE_MULTIPLE_BLOCK */
 #define CMD55	  55  /* APP_CMD */
 #define CMD58   58  /* READ_OCR */
+
+#define SECTOR_SIZE 512
+#define DATA_PACKET_LEN SECTOR_SIZE+3
 
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
@@ -128,7 +130,7 @@ Diskio_drvTypeDef  USER_Driver =
 };
 
 void spi_init(void);
-void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len);
+uint8_t send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -140,6 +142,8 @@ void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len);
 DSTATUS USER_initialize (BYTE pdrv)
 {
   /* USER CODE BEGIN INIT */
+  uint8_t dummy_clocks[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  
   Stat = STA_NOINIT;
 
   enum initialization_state 
@@ -260,8 +264,12 @@ DSTATUS USER_initialize (BYTE pdrv)
 DSTATUS USER_status (BYTE pdrv)
 {
   /* USER CODE BEGIN STATUS */
-  Stat = STA_NOINIT;
-  return Stat;
+  
+  // FOr the moment I assume to have only 1 physical drive (0)
+  if(pdrv)
+    return STA_NODISK;
+  else
+    return Stat;
   /* USER CODE END STATUS */
 }
 
@@ -276,7 +284,33 @@ DSTATUS USER_status (BYTE pdrv)
 DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
 {
   /* USER CODE BEGIN READ */
+  
+  // Response byte for CMD18 (r1)
+  uint8_t r1 = 0xFF;
+  
+  // data packet during the reading process. I assume sector size of 512 bytes.
+  uint8_t* data_packet = (uint8_t*)malloc(sizeof(uint8_t)*SECTOR_SIZE);
+  
+  // Send command
+  send_cmd(CMD18,sector,(uint8_t*)&r1,sizeof(r1));
+  
+  if(r1 != 0x01)
+    return RES_ERROR;
+  else
+  {
+    // I assume that a sector is 512 bytes
+    for(uint8_t i = 0; i < count; i++)
+    {
+      // DATA_PACKET_LEN is 515 bytes: 1 byte for the Token, 512 bytes of data, 2 bytes for the CRC
+      HAL_SPI_Receive(&hspi2, (uint8_t*)&data_packet, DATA_PACKET_LEN, DEFAULT_TIMEOUT);
+      memcpy(buff+(SECTOR_SIZE*i),data_packet+1,SECTOR_SIZE);
+    }
+    // After reading the sectors, I need to send the CMD12 to stop the flow
+    send_cmd(CMD18,sector,(uint8_t*)&r1,sizeof(r1));
+  }
+  
   return RES_OK;
+  
   /* USER CODE END READ */
 }
 
@@ -329,11 +363,13 @@ void spi_init(void)
   * @param  len: lenght of the array that will contain the response
   * @retval None
   */
-void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len)
+uint8_t send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len)
 {
 	// cmd packet is of fixed lenght
 	uint8_t cmd_packet[6] = {0};
 	uint8_t MOSI_high = 0xFF;
+  
+  uint8_t CMD12_answer = 0x00;
 	
 	// First byte is the command
 	// The cmd_packet must start with 01, therefore we add 0x40 to the cmd byte
@@ -355,10 +391,30 @@ void send_cmd(BYTE cmd, DWORD arg, uint8_t* res, short res_len)
 	else                   
     cmd_packet[5] = 0x01;
 	
-	// Send the command
+  // Send the command
   HAL_SPI_Transmit(&hspi2, cmd_packet, sizeof(cmd_packet), DEFAULT_TIMEOUT);
-  HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
-  HAL_SPI_Receive(&hspi2, res, res_len, DEFAULT_TIMEOUT);
+  
+  // Answer from the SD card
+  if(cmd != CMD12)
+  {
+    HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
+    HAL_SPI_Receive(&hspi2, res, res_len, DEFAULT_TIMEOUT);
+    return 0;
+  }
+  // CMD12 answer needs special handling
+  else
+  {
+    HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
+    // First byte of answer after issuing command 12 must be discarded
+    HAL_SPI_Receive(&hspi2, (uint8_t*)&CMD12_answer, sizeof(CMD12_answer), DEFAULT_TIMEOUT);
+    // After this first byte, the line DO (MISO) goes low and remains low until the sd card is busy
+    while(CMD12_answer != 0xFF)
+    {
+      HAL_SPI_Receive(&hspi2, (uint8_t*)&CMD12_answer, sizeof(CMD12_answer), DEFAULT_TIMEOUT);
+    }
+    // Return value will consider also a timeout
+    return 0;
+  }
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
