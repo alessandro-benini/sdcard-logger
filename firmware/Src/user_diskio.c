@@ -68,6 +68,8 @@
 
 #include "spi.h"
 
+#define _USE_WRITE 1
+
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 #define CS_HIGH() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
@@ -94,8 +96,14 @@
 #define CMD55	  55  /* APP_CMD */
 #define CMD58   58  /* READ_OCR */
 
+#define DATA_TOKEN_CMD24    0xFE
+#define DATA_TOKEN_CMD25    0xFC
+#define STOP_TOKEN_CMD25    0xFD
+
 #define SECTOR_SIZE 512
 #define DATA_PACKET_LEN SECTOR_SIZE+3
+
+uint8_t dummy_crc[] = {0xAB,0xAB};
 
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
@@ -250,7 +258,7 @@ DSTATUS USER_initialize (BYTE pdrv)
   CS_HIGH();
   
   // Set SPI clock back to 16Mbit/s for standard use
-  set_spi_clock_fast();
+  // set_spi_clock_fast();
   
   return Stat;
   /* USER CODE END INIT */
@@ -285,6 +293,8 @@ DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
 {
   /* USER CODE BEGIN READ */
   
+  CS_LOW();
+  
   // Response byte for CMD18 (r1)
   uint8_t r1 = 0xFF;
   
@@ -295,7 +305,10 @@ DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
   send_cmd(CMD18,sector,(uint8_t*)&r1,sizeof(r1));
   
   if(r1 != 0x01)
+  {
+    CS_HIGH();
     return RES_ERROR;
+  }
   else
   {
     // I assume that a sector is 512 bytes
@@ -308,6 +321,8 @@ DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
     // After reading the sectors, I need to send the CMD12 to stop the flow
     send_cmd(CMD18,sector,(uint8_t*)&r1,sizeof(r1));
   }
+  
+  CS_HIGH();
   
   return RES_OK;
   
@@ -326,6 +341,55 @@ DRESULT USER_read (BYTE pdrv,BYTE *buff,DWORD sector,UINT count)
 DRESULT USER_write (BYTE pdrv,const BYTE *buff,DWORD sector,UINT count)
 { 
   /* USER CODE BEGIN WRITE */
+  
+  CS_LOW();
+  
+  // Response byte for CMD25 (r1)
+  uint8_t r1 = 0xFF;
+  uint8_t data_response = 0x00;
+  
+  uint8_t busy = 0x00;
+  uint8_t stop_write = STOP_TOKEN_CMD25;
+  
+  uint8_t data_packet[DATA_PACKET_LEN];
+  
+  uint8_t cmd12_receive[15];
+  
+  data_packet[0] = DATA_TOKEN_CMD25;
+  data_packet[DATA_PACKET_LEN-2] = 0xAB;
+  data_packet[DATA_PACKET_LEN-1] = 0xAB;
+  
+  // Send command
+  send_cmd(CMD25,sector,(uint8_t*)&r1,sizeof(r1));
+  
+  if(r1 != 0x00)
+  {
+    CS_HIGH();
+    return RES_ERROR;
+  }
+  else
+  {
+    for(uint8_t i = 0; i < count; i++)
+    {
+      memcpy(data_packet+1,buff+((count-1)*SECTOR_SIZE),SECTOR_SIZE);
+      HAL_SPI_Transmit(&hspi2,(uint8_t*)&data_packet, DATA_PACKET_LEN, DEFAULT_TIMEOUT);
+      HAL_SPI_Receive(&hspi2, (uint8_t*)&data_response, 1, DEFAULT_TIMEOUT);
+      
+      // Wait until the sdcard is busy
+      // Todo: Evaluate the use of a timer
+      while(busy == 0x00)
+      {
+        HAL_SPI_Receive(&hspi2, (uint8_t*)&busy, 1, DEFAULT_TIMEOUT);
+      }
+      
+    }
+    // After writing the sectors, I need to send the stop token
+    HAL_SPI_Transmit(&hspi2,(uint8_t*)&stop_write, 1, DEFAULT_TIMEOUT);
+    HAL_SPI_Receive(&hspi2, (uint8_t*)&cmd12_receive, sizeof(cmd12_receive), DEFAULT_TIMEOUT);
+  }
+  
+  CS_HIGH();
+  
   /* USER CODE HERE */
    return RES_OK;
   /* USER CODE END WRITE */

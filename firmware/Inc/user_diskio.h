@@ -63,6 +63,7 @@
 /* Exported functions ------------------------------------------------------- */
 extern Diskio_drvTypeDef  USER_Driver;
 DSTATUS USER_initialize (BYTE pdrv);
+DRESULT USER_write (BYTE pdrv,const BYTE *buff,DWORD sector,UINT count);
 /* USER CODE END 0 */
    
 #ifdef __cplusplus
