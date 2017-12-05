@@ -105,20 +105,21 @@ int main(void)
   MX_FATFS_Init();
 	MX_SPI2_Init();
 	
-	USER_initialize(0);
+  USER_initialize(0);
   
   uint8_t array_data[512];
   
   for(int i = 0; i<512; i++)
   {
     if(i%2==0)
-      array_data[i]=0x10;
+      array_data[i]=0x44;
     else
-      array_data[i]=0x20;
+      array_data[i]=0x45;
   }
   
-  DWORD address = 0x000000AB;
-  uint8_t count = 1;    
+  DWORD address = 0x00000000;
+  uint8_t count = 1;
+  
   USER_write(0,array_data,address,count);
     
 

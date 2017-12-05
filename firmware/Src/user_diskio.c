@@ -348,12 +348,12 @@ DRESULT USER_write (BYTE pdrv,const BYTE *buff,DWORD sector,UINT count)
   uint8_t r1 = 0xFF;
   uint8_t data_response = 0x00;
   
+  uint8_t MOSI_high = 0xFF;
+  
   uint8_t busy = 0x00;
   uint8_t stop_write = STOP_TOKEN_CMD25;
   
   uint8_t data_packet[DATA_PACKET_LEN];
-  
-  uint8_t cmd12_receive[15];
   
   data_packet[0] = DATA_TOKEN_CMD25;
   data_packet[DATA_PACKET_LEN-2] = 0xAB;
@@ -375,17 +375,35 @@ DRESULT USER_write (BYTE pdrv,const BYTE *buff,DWORD sector,UINT count)
       HAL_SPI_Transmit(&hspi2,(uint8_t*)&data_packet, DATA_PACKET_LEN, DEFAULT_TIMEOUT);
       HAL_SPI_Receive(&hspi2, (uint8_t*)&data_response, 1, DEFAULT_TIMEOUT);
       
+      HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
+      
       // Wait until the sdcard is busy
       // Todo: Evaluate the use of a timer
       while(busy == 0x00)
       {
+        //HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
         HAL_SPI_Receive(&hspi2, (uint8_t*)&busy, 1, DEFAULT_TIMEOUT);
       }
       
     }
+    HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
     // After writing the sectors, I need to send the stop token
     HAL_SPI_Transmit(&hspi2,(uint8_t*)&stop_write, 1, DEFAULT_TIMEOUT);
-    HAL_SPI_Receive(&hspi2, (uint8_t*)&cmd12_receive, sizeof(cmd12_receive), DEFAULT_TIMEOUT);
+    busy = 0xFF;
+    // Wait until the sdcard is busy
+    // Todo: Evaluate the use of a timer
+    
+    while(busy != 0x00)
+    {
+      HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);
+      HAL_SPI_Receive(&hspi2, (uint8_t*)&busy, 1, DEFAULT_TIMEOUT);
+      
+      while(busy == 0x00)
+      {   
+        HAL_SPI_Transmit(&hspi2, (uint8_t*)&MOSI_high, sizeof(MOSI_high), DEFAULT_TIMEOUT);   
+        HAL_SPI_Receive(&hspi2, (uint8_t*)&busy, 1, DEFAULT_TIMEOUT);
+      }
+    }    
   }
   
   CS_HIGH();
